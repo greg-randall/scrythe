@@ -1,0 +1,4 @@
+*.csv
+cache/*
+old*
+__pycache__/*
