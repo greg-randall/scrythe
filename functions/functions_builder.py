@@ -14,9 +14,14 @@ from lxml import etree
 from urllib.parse import urljoin, urlunparse
 import csv
 
+from collections import defaultdict
+import statistics
+
 from functions.functions_openai import gpt_me, open_ai_cost
 import tiktoken
 from typing import Tuple
+
+from pprint import pprint
 
 def initialize_tokenizer(html: str) -> Tuple[str, tiktoken.Encoding]:
     """
@@ -169,14 +174,14 @@ def create_job_page_schema() -> List[Dict]:
     """Create schema for GPT job page processing."""
     return [{
         "name": "get_gpt_output",
-        "description": "Extract job listing urls and pagination from the given HTML",
+        "description": "Extract ONLY job listing URLs and pagination elements from the HTML. Focus on href attributes for job links and navigation elements.",
         "parameters": {
             "type": "object",
             "properties": {
                 "job_elements": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Get the URL/relative path of the job listings on this page. If you can't find URLs/relative paths, please return an empty array."
+                    "description": "Extract ONLY the href attribute values or relative paths for job listing links. These should all be grouped together in the main body of the page. Do not include any HTML tags, text content, or other attributes. For absolute URLs, return the complete URL. For relative paths, return the path exactly as it appears in the href. Return an empty array if no job listing links are found."
                 },
                 "next_page": {
                     "type": "string",
@@ -290,22 +295,80 @@ def validate_xpath(xpath: str) -> bool:
     except Exception:
         return False
 
+def filter_xpath_patterns(xpaths: List[str]) -> List[str]:
+    """
+    Filter XPaths to keep only the most common pattern based on length and structure.
+    
+    Args:
+        xpaths: List of XPath strings
+    
+    Returns:
+        List of XPaths that follow the most common pattern
+    """
+    if not xpaths:
+        return []
+    
+    # Step 1: Group XPaths by length
+    length_groups = defaultdict(list)
+    for xpath in xpaths:
+        length_groups[len(xpath)].append(xpath)
+    
+    # Step 2: Find the most common length group
+    lengths = [len(xpath) for xpath in xpaths]
+    median_length = statistics.median(lengths)
+    std_dev = statistics.stdev(lengths) if len(lengths) > 1 else 0
+    
+    # Step 3: Group similar lengths (within 1 standard deviation)
+    similar_length_xpaths = []
+    for xpath in xpaths:
+        if abs(len(xpath) - median_length) <= std_dev:
+            similar_length_xpaths.append(xpath)
+    
+    # Step 4: Further filter by structural similarity
+    structure_groups = defaultdict(list)
+    for xpath in similar_length_xpaths:
+        # Create a structural signature by replacing numbers with 'N'
+        signature = ''.join('N' if c.isdigit() else c for c in xpath)
+        structure_groups[signature].append(xpath)
+    
+    # Find the largest structure group
+    largest_group = max(structure_groups.values(), key=len)
+    
+    # Only return the group if it represents a significant portion (>40%) of original XPaths
+    if len(largest_group) / len(xpaths) > 0.4:
+        return largest_group
+    return xpaths  # Return original list if no clear majority pattern
+
 def generalize_xpath(xpaths_dict: Dict[str, str]) -> Tuple[Optional[str], float]:
     """Generalize XPaths to find common pattern."""
-    xpaths = '\n'.join(natsorted(str(v) for v in xpaths_dict.values()))
+    # Convert dict values to list of XPaths and filter for common patterns
+    xpath_list = [str(v) for v in xpaths_dict.values()]
+    print("~"*50)
+    pprint(xpath_list)
+    print("~"*50)    
+    filtered_xpaths = filter_xpath_patterns(xpath_list)
+    pprint(filtered_xpaths)
+    print("~"*50)
+    
+    # Join filtered XPaths for GPT prompt
+    xpaths = '\n'.join(natsorted(filtered_xpaths))
     
     prompt = (
-        "Please review the below XPATHS (one per line) and see if they have commonalities, "
-        "if they do please return a generic XPATH selector that will select the majority "
-        "of the elements, if it looks like a range use the asterisk to select all, "
-        "typically there will be one asterisk in the generic XPATH. Do NOT add any "
-        "formatting or explanation, just return the raw XPATH string. If you can't "
-        "figure out a generic XPATH, reply with 'False':\n\n"
+        "Please review the below XPATHS (one per line) and identify the most common pattern. "
+        "Important instructions:\n"
+        "1. First, group the XPaths by their overall structure and count how many follow each pattern\n"
+        "2. Select the pattern that appears most frequently\n"
+        "3. For that pattern, replace the varying numeric index with [*] to create a generic selector (typically there will be one asterisk)\n"
+        "4. Return ONLY the generic XPath for the most common pattern\n"
+        "5. If no pattern appears in more than 50% of the XPaths, return 'False'\n"
+        "6. Do not include any explanation or formatting, just the raw XPath or 'False'\n\n"
         f"{xpaths}"
     )
-    
-    gpt_output, cost = gpt_me(prompt, 'gpt-4o-mini', None, True)
+
+    gpt_output, cost = gpt_me(prompt, 'gpt-4o', None, True)
+
     cleaned_xpath = gpt_output.replace('```xpath', '').replace('```', '').strip()
+
     
     # Validate the cleaned XPath
     if cleaned_xpath and cleaned_xpath.lower() != 'false':

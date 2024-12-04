@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import validators
+from pprint import pprint
 from functions.functions_selenium import init_selenium, navigate_and_wait, get_page_html
 from functions.functions_builder import (
     clean_page,
@@ -122,8 +123,9 @@ def main() -> None:
         if verbose:
             print("Generating XPath patterns...")
         xpaths = generate_xpaths_for_all_elements(html)
+ 
         xpaths_for_job_elements = find_xpath_for_string(xpaths, job_urls)
-        
+                
         generalized_xpath, cost = generalize_xpath(xpaths_for_job_elements)
         overall_cost += cost
         
@@ -149,18 +151,21 @@ def main() -> None:
             
         if verbose:
             print(f"Found pagination pattern: {full_url} (increment: {page_increment})")
-            
-        # Save configuration
-        timestamp_human = time.strftime('%Y-%m-%d %I:%M:%S %p', time.localtime())
-        timestamp_unix = int(time.time())
         
-        write_config_to_csv(
-            timestamp_human,
-            timestamp_unix,
-            generalized_xpath,
-            full_url,
-            page_increment
-        )
+        if generalized_xpath == False:
+            print("No generalized XPath found\nNo configuration saved")
+        else:       
+            # Save configuration
+            timestamp_human = time.strftime('%Y-%m-%d %I:%M:%S %p', time.localtime())
+            timestamp_unix = int(time.time())
+            
+            write_config_to_csv(
+                timestamp_human,
+                timestamp_unix,
+                generalized_xpath,
+                full_url,
+                page_increment
+            )
         
         # Print summary
         total_time = time.time() - start_time
@@ -170,7 +175,10 @@ def main() -> None:
         print(f"- Generic job XPath: {generalized_xpath}")
         print(f"- OpenAI API cost: ${overall_cost:.4f}")
         print(f"- Total time: {total_time:.2f} seconds")
-        print("Configuration saved to sites_to_scrape.csv")
+        if generalized_xpath == False:
+            print("No configuration saved")
+        else:
+            print("Configuration saved to sites_to_scrape.csv")
         
     except Exception as e:
         print(f"Error: {str(e)}")
