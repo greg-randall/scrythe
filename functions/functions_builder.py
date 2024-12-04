@@ -343,12 +343,12 @@ def generalize_xpath(xpaths_dict: Dict[str, str]) -> Tuple[Optional[str], float]
     """Generalize XPaths to find common pattern."""
     # Convert dict values to list of XPaths and filter for common patterns
     xpath_list = [str(v) for v in xpaths_dict.values()]
-    print("~"*50)
-    pprint(xpath_list)
-    print("~"*50)    
+    #print("~"*50)
+    #pprint(xpath_list)
+    #print("~"*50)    
     filtered_xpaths = filter_xpath_patterns(xpath_list)
-    pprint(filtered_xpaths)
-    print("~"*50)
+    #pprint(filtered_xpaths)
+    #print("~"*50)
     
     # Join filtered XPaths for GPT prompt
     xpaths = '\n'.join(natsorted(filtered_xpaths))
@@ -365,7 +365,7 @@ def generalize_xpath(xpaths_dict: Dict[str, str]) -> Tuple[Optional[str], float]
         f"{xpaths}"
     )
 
-    gpt_output, cost = gpt_me(prompt, 'gpt-4o', None, True)
+    gpt_output, cost = gpt_me(prompt, 'gpt-4o-mini', None, True)
 
     cleaned_xpath = gpt_output.replace('```xpath', '').replace('```', '').strip()
 
