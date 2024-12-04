@@ -1,5 +1,8 @@
 import pytest
 from bs4 import BeautifulSoup
+from unittest.mock import patch, Mock, MagicMock
+from bs4 import BeautifulSoup
+
 from functions.functions_builder import (
     clean_page,
     clean_html_attributes,
@@ -12,7 +15,12 @@ from functions.functions_builder import (
     extract_job_urls,  # Add this to test the moved function
     process_and_extract_jobs,  # Add this if it was moved
     analyze_pagination,  # Add this if it was moved
-    write_config_to_csv  # Add this if it was moved
+    write_config_to_csv,  # Add this if it was moved
+    pretty_round,
+    filter_xpath_patterns,
+    sift_next_page_link,
+    create_job_page_schema,
+    process_gpt_response
 )
 
 # Add new test for extract_job_urls function
@@ -136,3 +144,139 @@ def test_process_jobs_page_with_gpt(mock_openai):
     """Test job page processing with mocked OpenAI."""
     html = "<div><a href='/job1'>Job 1</a><a href='/job2'>Job 2</a></div>"
     result, cost = process_jobs_page_with_gpt(html)
+
+
+def test_pretty_round():
+    """Test pretty_round number formatting."""
+    # Test basic rounding
+    assert pretty_round(1.2345) == 1.23
+    assert pretty_round(1.2) == 1.2
+    assert pretty_round(1.0) == 1.0
+    
+    # Test with trailing zeros
+    assert pretty_round(1.20000) == 1.2
+    assert pretty_round(1.00100) == 1.001
+    
+    # Test with very small numbers
+    assert pretty_round(0.00123) == 0.001
+    assert pretty_round(0.000123) == 0.0001
+
+def test_filter_xpath_patterns():
+    """Test filtering and grouping of XPath patterns."""
+    # Test with similar patterns
+    similar_xpaths = [
+        "/html/body/div[1]/a",
+        "/html/body/div[2]/a",
+        "/html/body/div[3]/a",
+        "/html/body/div[1]/span"  # Different pattern
+    ]
+    filtered = filter_xpath_patterns(similar_xpaths)
+    assert len(filtered) == 3  # Should exclude the span pattern
+    assert all("div" in xpath for xpath in filtered)
+    
+    # Test with no clear pattern
+    diverse_xpaths = [
+        "/html/body/div[1]/a",
+        "/html/body/span/p",
+        "/html/section/article",
+        "/div/p/span"
+    ]
+    filtered = filter_xpath_patterns(diverse_xpaths)
+    assert len(filtered) == 4  # Should return original list if no clear pattern
+    
+    # Test with empty input
+    assert filter_xpath_patterns([]) == []
+    
+    # Test with single item
+    single_xpath = ["/html/body/div[1]/a"]
+    assert filter_xpath_patterns(single_xpath) == single_xpath
+
+def test_sift_next_page_link():
+    """Test pagination pattern analysis."""
+    # Test standard pagination
+    html_standard = '''
+    <div class="pagination">
+        <a href="/jobs/search?page=1">1</a>
+        <a href="/jobs/search?page=2">2</a>
+        <a href="/jobs/search?page=3">3</a>
+    </div>
+    '''
+    url, increment, cost = sift_next_page_link(html_standard)
+    assert url == "/jobs/search?page="
+    assert increment == 1
+    assert isinstance(cost, float)
+    
+    # Test non-standard increment
+    html_nonstandard = '''
+    <div class="pagination">
+        <a href="/jobs?from=10">Page 1</a>
+        <a href="/jobs?from=20">Page 2</a>
+        <a href="/jobs?from=30">Page 3</a>
+    </div>
+    '''
+    url, increment, cost = sift_next_page_link(html_nonstandard)
+    assert url == "/jobs?from="
+    assert increment == 10
+    assert isinstance(cost, float)
+    
+    # Test no pagination
+    html_no_pagination = '<div>No pagination here</div>'
+    url, increment, cost = sift_next_page_link(html_no_pagination)
+    assert url is False
+    assert increment is False
+    assert cost is False
+
+def test_create_job_page_schema():
+    """Test job page schema creation."""
+    schema = create_job_page_schema()
+    
+    # Verify schema structure
+    assert isinstance(schema, list)
+    assert len(schema) == 1
+    assert 'name' in schema[0]
+    assert 'description' in schema[0]
+    assert 'parameters' in schema[0]
+    
+    # Verify parameters
+    params = schema[0]['parameters']
+    assert params['type'] == 'object'
+    assert 'job_elements' in params['properties']
+    assert 'next_page' in params['properties']
+    assert params['required'] == ['next_page', 'job_elements']
+
+def test_process_gpt_response():
+    """Test GPT response processing."""
+    # Test successful response
+    mock_response = Mock()
+    mock_response.choices = [
+        Mock(
+            message=Mock(
+                function_call=Mock(
+                    arguments='{"job_elements": ["job1", "job2"], "next_page": "<a>Next</a>"}'
+                )
+            )
+        )
+    ]
+    mock_response.usage = Mock(prompt_tokens=100, completion_tokens=50)
+    mock_response.model = "gpt-4o-mini"
+    
+    result, cost = process_gpt_response(mock_response)
+    assert isinstance(result, dict)
+    assert 'job_elements' in result
+    assert 'next_page' in result
+    assert isinstance(cost, float)
+    assert result['job_elements'] == ['job1', 'job2']
+    assert result['next_page'] == '<a>Next</a>'
+    
+    # Test invalid JSON response
+    mock_response.choices[0].message.function_call.arguments = 'invalid json'
+    result, cost = process_gpt_response(mock_response)
+    assert result is False
+    assert cost is False
+    
+    # Test with missing function call
+    mock_response.choices[0].message = Mock(content="Some content")
+    mock_response.choices[0].message.function_call = None
+    result, cost = process_gpt_response(mock_response)
+    assert result is False
+    assert cost is False
