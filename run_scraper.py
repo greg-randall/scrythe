@@ -1,51 +1,67 @@
-# Standard library imports
-import os
-import csv
+"""
+Module for running web scrapers using configured settings from CSV file.
+This module focuses on orchestrating the scraping process, while delegating
+the implementation details to functions in functions_scraper.py.
+"""
+from typing import Dict, List, Optional
+import sys
 import secrets
-from urllib.parse import urlparse
+from selenium.webdriver.remote.webdriver import WebDriver
 
-# Import all functions from the functions file
-from functions import (
-    init_selenium,
-    generic_paged_scraper_by_xpath,
-    download_all_links
+from functions.functions_selenium import init_selenium
+from functions.functions_scraper import (
+    load_scraper_configs,
+    randomize_configs,
+    scrape_single_site
 )
 
+def run_scrapers(configs: List[Dict], driver: WebDriver) -> None:
+    """
+    Execute scraping process for all configured sites.
+    
+    This is the main orchestration function that:
+    1. Takes a list of scraper configurations
+    2. Iterates through each config
+    3. Executes the scraping process for each site
+    
+    Args:
+        configs: List of dictionaries containing scraper configurations
+        driver: Initialized Selenium WebDriver instance
+    """
+    for config in configs:
+        scrape_single_site(config, driver)
 
-# Check if the directory 'cache' exists
-if not os.path.isdir('cache'):
-    os.makedirs('cache')
+def main() -> None:
+    """
+    Main entry point for the scraping process.
+    
+    Process flow:
+    1. Load scraper configurations from CSV
+    2. Randomize the order of sites to scrape
+    3. Initialize the browser
+    4. Execute the scraping process
+    5. Clean up browser resources
+    
+    Handles errors gracefully and ensures browser cleanup.
+    """
+    driver = None
+    try:
+        driver = init_selenium()
+        
+        # Load and randomize configurations
+        configs = load_scraper_configs('sites_to_scrape.csv')
+        randomized_configs = randomize_configs(configs)
+        
+        # Run scrapers
+        run_scrapers(randomized_configs, driver)
+        
+    except Exception as e:
+        print(f"Error during scraping process: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+        
+    finally:
+        if driver:
+            driver.quit()
 
-# Initialize an empty list to store the extracted data
-extracted_data = []
-
-# Read from CSV
-with open('sites_to_scrape.csv', mode='r', newline='') as file:
-    reader = csv.reader(file)
-    # Skip the header
-    next(reader)
-    # Extract the required columns
-    for row in reader:
-        extracted_data.append([row[2].strip(), row[3].strip(), int(row[4].strip())])
-
-# Shuffle the data
-secrets.SystemRandom().shuffle(extracted_data[-1])
-
-driver = init_selenium(True)
-
-for data in extracted_data:
-    url = data[1]
-    xpath = data[0]
-    increment = data[2]
-    if increment == 1:
-        start_page = 1
-    else:
-        start_page = 0
-    parsed_url = urlparse(url)
-    name = parsed_url.netloc
-    print(f"Scraping {url}")
-    links = generic_paged_scraper_by_xpath(url, driver, xpath, True, start_page, increment) 
-    download_all_links(links, driver, name, 2)
-
-    print(f"Finished scraping {url}\n\n")
-driver.quit()
+if __name__ == "__main__":
+    main()
