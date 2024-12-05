@@ -403,8 +403,12 @@ def sift_next_page_link(html: str) -> Tuple[Optional[str], Optional[int], float]
         base_url, increment = gpt_output.split('~')
         return base_url, int(increment), cost
     
-    base_url = re.sub(r'(^.+=).+', '$1', gpt_output).replace('$1', '')
-    return base_url, 1, cost
+    if gpt_output.startswith('/'):
+        return gpt_output, 1, cost
+    
+    gpt_output = '/' + gpt_output
+    gpt_output.replace("//", "/")
+    return gpt_output, 1, cost
 
 
 def analyze_pagination(next_page: str, base_url: str) -> Tuple[Optional[str], Optional[int]]:
