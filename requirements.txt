@@ -8,6 +8,7 @@ nltk
 numpy
 ollama
 openai
+pytest
 Requests
 selenium
 selenium_stealth
